@@ -14,6 +14,10 @@ that shows your **live claude.ai / Claude subscription usage** — the same
 - **Weekly limits** — "All models", plus any model-scoped limit (e.g. Fable),
   each with % used and reset time.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Claude Usage Widget: session, weekly, and Fable usage bars with reset countdowns" width="320">
+</p>
+
 The numbers are **real**. They come from the authenticated usage endpoint that
 Claude Code itself calls:
 
