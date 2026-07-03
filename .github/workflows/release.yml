@@ -1,0 +1,71 @@
+name: Release
+
+# Build standalone apps for Windows, macOS and Linux and attach them to a
+# GitHub Release whenever a version tag (e.g. v1.0.0) is pushed.
+#
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# Public repos get unlimited free minutes on all three runner OSes, so this
+# produces every platform's binary from a single tag — no local Mac/Linux box.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Needed for the workflow to create/update the Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: ClaudeUsageWidget-windows.zip
+          - os: macos-latest
+            asset: ClaudeUsageWidget-macos.zip
+          - os: ubuntu-latest
+            asset: ClaudeUsageWidget-linux.tar.gz
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      # We invoke PyInstaller directly rather than build.bat / build.sh: the
+      # scripts include an interactive "pause" and echo steps meant for humans,
+      # which would hang or add noise in CI. The flags here mirror those scripts.
+      - name: Build
+        run: pyinstaller --noconfirm --onefile --windowed --name ClaudeUsageWidget main.py
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/ClaudeUsageWidget.exe -DestinationPath ClaudeUsageWidget-windows.zip
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        # dist/ClaudeUsageWidget.app is a bundle (directory); zip it preserving structure.
+        run: ditto -c -k --keepParent dist/ClaudeUsageWidget.app ClaudeUsageWidget-macos.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf ClaudeUsageWidget-linux.tar.gz -C dist ClaudeUsageWidget
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}

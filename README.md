@@ -1,5 +1,11 @@
 # Claude Usage Widget
 
+> **Unofficial community project.** Not affiliated with, endorsed by, or
+> sponsored by Anthropic. "Claude" is a trademark of Anthropic. This tool only
+> reads the OAuth login that Claude Code already stores on your own machine and
+> calls the same usage endpoint Claude Code uses — it stores no secrets of its
+> own.
+
 A small always-on-top floating desktop widget for **Windows, macOS, and Linux**
 that shows your **live claude.ai / Claude subscription usage** — the same
 "Plan usage limits" panel you see inside the app:
@@ -41,6 +47,19 @@ the widget will recover on its next refresh.
 
 > **Requirement:** you must be logged in to Claude Code on this machine
 > (`claude` CLI, run at least once). No login file → no data.
+
+## Download
+
+Prebuilt standalone apps for each OS are attached to every
+[GitHub Release](../../releases) — no Python needed:
+
+- **Windows** — `ClaudeUsageWidget-windows.zip` → unzip → run `ClaudeUsageWidget.exe`.
+- **macOS** — `ClaudeUsageWidget-macos.zip` → unzip → move `ClaudeUsageWidget.app`
+  to Applications. The app is **unsigned**, so on first launch macOS Gatekeeper
+  will block it: **right-click the app → Open → Open** (only needed once).
+- **Linux** — `ClaudeUsageWidget-linux.tar.gz` → extract → `./ClaudeUsageWidget`.
+
+Prefer to run from source? See **Setup** below.
 
 ## Setup
 
