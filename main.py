@@ -38,7 +38,7 @@ import subprocess
 from datetime import datetime, timezone
 
 import requests
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QLockFile
+from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QPainter, QColor, QFont, QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QMenu,
@@ -821,16 +821,6 @@ class UsageWidget(QWidget):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-
-    # Single-instance guard: a second copy would double the polling rate and
-    # can trip the API's rate limit. If another instance holds the lock, bail
-    # out quietly. Kept alive for the process lifetime; released on exit.
-    lock = QLockFile(os.path.join(config_dir(), "instance.lock"))
-    lock.setStaleLockTime(0)  # a lock from a dead process is treated as free
-    if not lock.tryLock(100):
-        print("Claude Usage Widget is already running.")
-        return
-    app._instance_lock = lock  # prevent garbage collection
 
     widget = UsageWidget()
     widget.show()
