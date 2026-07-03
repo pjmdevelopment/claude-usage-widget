@@ -125,3 +125,8 @@ Earlier versions tried to approximate subscription limits with a *manual*
 counter, because the data "had no API". It turns out it does — the OAuth
 `/usage` endpoint above — so the manual tracker and the separate Admin-API
 dollar-cost view were removed in favour of the real thing.
+
+## License
+
+[MIT](LICENSE) © PJM Development. Unofficial community project; not affiliated
+with Anthropic.
