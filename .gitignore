@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller build output
+build/
+dist/
+
+# OS cruft
+.DS_Store
+Thumbs.db
