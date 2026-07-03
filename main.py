@@ -32,12 +32,13 @@ Widget config (position, refresh interval) is stored per-platform:
 import sys
 import os
 import json
+import time
 import threading
 import subprocess
 from datetime import datetime, timezone
 
 import requests
-from PySide6.QtCore import Qt, QTimer, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QLockFile
 from PySide6.QtGui import QPainter, QColor, QFont, QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QMenu,
@@ -589,6 +590,7 @@ class UsageWidget(QWidget):
         self._drag_pos = None
         self._last_raw = ""
         self._fetching = False
+        self._cooldown_until = 0.0   # monotonic time before which we skip polling
         self._rows = []          # UsageRow widgets, reused across refreshes
 
         self.setWindowFlags(
@@ -738,6 +740,12 @@ class UsageWidget(QWidget):
     def fetch_usage(self):
         if self._fetching:
             return
+        # Respect a rate-limit cooldown: after a 429 we wait out the server's
+        # Retry-After before polling again — never poll faster to "recover".
+        remaining = self._cooldown_until - time.monotonic()
+        if remaining > 0:
+            self.status_label.setText(f"⚠ Rate limited — waiting {int(remaining) + 1}s")
+            return
         self._fetching = True
         self.status_label.setText("Refreshing…")
 
@@ -759,12 +767,13 @@ class UsageWidget(QWidget):
         else:
             err = result.get("error", "Unknown error")
             self.status_label.setText(err[:70])
-            # For a transient rate-limit, retry once soon so the message clears
-            # without waiting the full refresh interval. The periodic timer keeps
-            # running; the _fetching guard prevents overlapping requests.
+            # On a rate-limit, back OFF: suppress polling until the server's
+            # Retry-After window elapses. The periodic timer keeps firing but
+            # fetch_usage() will skip while we're inside the cooldown, so we
+            # stop adding load instead of hammering. Last-known bars stay up.
             retry_after = result.get("retry_after")
             if retry_after:
-                QTimer.singleShot(int(retry_after) * 1000, self.fetch_usage)
+                self._cooldown_until = time.monotonic() + retry_after
 
     def _render_rows(self, limits):
         self._ensure_rows(len(limits))
@@ -812,6 +821,16 @@ class UsageWidget(QWidget):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+
+    # Single-instance guard: a second copy would double the polling rate and
+    # can trip the API's rate limit. If another instance holds the lock, bail
+    # out quietly. Kept alive for the process lifetime; released on exit.
+    lock = QLockFile(os.path.join(config_dir(), "instance.lock"))
+    lock.setStaleLockTime(0)  # a lock from a dead process is treated as free
+    if not lock.tryLock(100):
+        print("Claude Usage Widget is already running.")
+        return
+    app._instance_lock = lock  # prevent garbage collection
 
     widget = UsageWidget()
     widget.show()
