@@ -295,6 +295,29 @@ def read_oauth_token(credentials_path):
 # Usage API client (runs in a background thread)
 # --------------------------------------------------------------------------
 
+# Bounds for how soon we auto-retry after a 429, in seconds.
+RETRY_AFTER_MIN = 5
+RETRY_AFTER_MAX = 60
+RETRY_AFTER_DEFAULT = 15
+
+
+def _parse_retry_after(response):
+    """Seconds to wait before retrying a rate-limited request.
+
+    Uses the ``Retry-After`` header when present (integer seconds), otherwise a
+    sensible default, always clamped so we neither hammer the API nor stall."""
+    raw = None
+    try:
+        raw = response.headers.get("Retry-After")
+    except Exception:
+        raw = None
+    try:
+        secs = int(float(raw)) if raw is not None else RETRY_AFTER_DEFAULT
+    except (TypeError, ValueError):
+        secs = RETRY_AFTER_DEFAULT
+    return max(RETRY_AFTER_MIN, min(RETRY_AFTER_MAX, secs))
+
+
 class UsageFetcher(QObject):
     # emits {"ok": bool, "error": str, "limits": [ ... ], "plan": str,
     #        "raw": str}
@@ -305,7 +328,8 @@ class UsageFetcher(QObject):
         self.credentials_path = credentials_path
 
     def run(self):
-        result = {"ok": False, "error": "", "limits": [], "plan": "", "raw": ""}
+        result = {"ok": False, "error": "", "limits": [], "plan": "", "raw": "",
+                  "retry_after": None}
 
         token, err = read_oauth_token(self.credentials_path)
         if not token:
@@ -341,6 +365,12 @@ class UsageFetcher(QObject):
             code = e.response.status_code if e.response is not None else "?"
             if code == 401:
                 result["error"] = "Auth rejected — run Claude Code to refresh login"
+            elif code == 429:
+                # Transient: the endpoint is rate-limiting us. Keep the last
+                # good numbers on screen and quietly retry after the server's
+                # hint (or a sensible default), capped so we never hammer.
+                result["error"] = "Rate limited — retrying shortly"
+                result["retry_after"] = _parse_retry_after(e.response)
             else:
                 result["error"] = f"HTTP {code}: {body}"
         except Exception as e:
@@ -729,6 +759,12 @@ class UsageWidget(QWidget):
         else:
             err = result.get("error", "Unknown error")
             self.status_label.setText(err[:70])
+            # For a transient rate-limit, retry once soon so the message clears
+            # without waiting the full refresh interval. The periodic timer keeps
+            # running; the _fetching guard prevents overlapping requests.
+            retry_after = result.get("retry_after")
+            if retry_after:
+                QTimer.singleShot(int(retry_after) * 1000, self.fetch_usage)
 
     def _render_rows(self, limits):
         self._ensure_rows(len(limits))
