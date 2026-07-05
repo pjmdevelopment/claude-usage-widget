@@ -673,6 +673,12 @@ class UsageWidget(QWidget):
 
         menu.addSeparator()
 
+        self.hide_action = QAction("Hide widget", self)
+        self.hide_action.triggered.connect(self.toggle_visibility)
+        menu.addAction(self.hide_action)
+
+        menu.addSeparator()
+
         settings_action = QAction("Settings...", self)
         settings_action.triggered.connect(self.open_settings)
         menu.addAction(settings_action)
@@ -710,7 +716,18 @@ class UsageWidget(QWidget):
 
     def _tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
-            self.setVisible(not self.isVisible())
+            self.toggle_visibility()
+
+    def toggle_visibility(self):
+        if self.isVisible():
+            self.setVisible(False)
+            self.refresh_timer.stop()
+            self.hide_action.setText("Show widget")
+        else:
+            self.setVisible(True)
+            self.hide_action.setText("Hide widget")
+            self._apply_refresh_interval()
+            self.fetch_usage()
 
     # ---- Dragging -----------------------------------------------------
 
