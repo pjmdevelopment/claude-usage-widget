@@ -6,7 +6,10 @@ shows your live claude.ai / Claude Code subscription usage — the same
 "Plan usage limits" data you see in the app:
 
   * Current session (5-hour window) utilisation + reset countdown
-  * Weekly limits (all models, plus any model-scoped limits like Fable)
+  * Weekly limits (all models, plus any model-scoped limits like Fable on
+    Max 5x / Max 20x plans)
+  * Usage credits (Pro plans bill Fable against a credit balance rather than
+    a model-scoped weekly limit)
 
 The data comes from the authenticated OAuth usage endpoint that Claude Code
 itself uses:
@@ -400,8 +403,12 @@ class UsageFetcher(QObject):
         limits = data.get("limits")
         if isinstance(limits, list) and limits:
             # Session limits first, then weekly, preserving API order within.
+            # Credit-style entries are rendered by _credit_rows instead, so
+            # they get amount formatting rather than a bare percentage.
             order = {"session": 0, "weekly": 1}
             for item in sorted(limits, key=lambda i: order.get(i.get("group"), 2)):
+                if UsageFetcher._is_credit_item(item):
+                    continue
                 pct = item.get("percent")
                 if pct is None:
                     continue
@@ -412,6 +419,7 @@ class UsageFetcher(QObject):
                     "severity": item.get("severity", "normal"),
                     "resets_at": item.get("resets_at"),
                 })
+            rows.extend(UsageFetcher._credit_rows(data))
             return rows
 
         # Fallback: older/simpler shape.
@@ -428,7 +436,98 @@ class UsageFetcher(QObject):
                     "severity": "normal",
                     "resets_at": node.get("resets_at"),
                 })
+        rows.extend(UsageFetcher._credit_rows(data))
         return rows
+
+    # ---- Usage credits (Pro plans bill Fable against a credit balance) ----
+
+    @staticmethod
+    def _is_credit_item(item):
+        if not isinstance(item, dict):
+            return False
+        kind = str(item.get("kind", ""))
+        return item.get("group") == "credits" or "credit" in kind
+
+    @staticmethod
+    def _credit_rows(data):
+        """Find usage-credit balances anywhere in the response and turn them
+        into display rows. The endpoint is undocumented, so we accept both a
+        top-level credits block and credit-kind entries in ``limits``, under a
+        few plausible key names."""
+        candidates = []
+        for key in ("usage_credits", "credits", "extra_usage", "credit_balance"):
+            node = data.get(key)
+            if isinstance(node, dict):
+                candidates.append(node)
+        limits = data.get("limits")
+        if isinstance(limits, list):
+            candidates.extend(i for i in limits if UsageFetcher._is_credit_item(i))
+
+        rows = []
+        for node in candidates:
+            row = UsageFetcher._credit_row(node)
+            if row:
+                rows.append(row)
+        return rows
+
+    @staticmethod
+    def _credit_row(node):
+        def num(*keys):
+            for k in keys:
+                v = node.get(k)
+                if isinstance(v, (int, float)):
+                    return float(v)
+            return None
+
+        used = num("used", "consumed", "spent")
+        remaining = num("remaining", "balance", "available")
+        total = num("total", "granted", "allowance", "limit")
+        if total is None and used is not None and remaining is not None:
+            total = used + remaining
+        if used is None and total is not None and remaining is not None:
+            used = total - remaining
+
+        percent = num("percent", "utilization")
+        if percent is None and used is not None and total:
+            percent = used / total * 100.0
+        if percent is None:
+            return None
+        percent = max(0.0, min(100.0, percent))
+
+        severity = node.get("severity")
+        if severity not in SEVERITY_COLORS:
+            severity = (
+                "critical" if percent >= 90
+                else "warning" if percent >= 75
+                else "normal"
+            )
+
+        unit = str(node.get("unit") or node.get("currency") or "").lower()
+
+        def fmt(v):
+            if v is None:
+                return None
+            if unit in ("usd_cents", "cents", "cent"):
+                return f"${v / 100:.2f}"
+            if unit in ("usd", "dollars"):
+                return f"${v:.2f}"
+            return f"{v:g}"
+
+        if used is not None and total is not None:
+            pct_text = f"{fmt(used)} of {fmt(total)}"
+        elif remaining is not None:
+            pct_text = f"{fmt(remaining)} left"
+        else:
+            pct_text = None  # UsageRow falls back to "N% used"
+
+        return {
+            "label": "Usage credits",
+            "group": "credits",
+            "percent": percent,
+            "pct_text": pct_text,
+            "severity": severity,
+            "resets_at": node.get("resets_at"),
+        }
 
 
 # --------------------------------------------------------------------------
@@ -501,7 +600,7 @@ class UsageRow(QWidget):
     def update_from(self, row):
         self.title.setText(row["label"])
         pct = row["percent"]
-        self.pct.setText(f"{pct:.0f}% used")
+        self.pct.setText(row.get("pct_text") or f"{pct:.0f}% used")
         color = SEVERITY_COLORS.get(row.get("severity", "normal"), DEFAULT_BAR_COLOR)
         self.bar.set_value(pct, color)
         self.reset.setText(self._reset_text(row.get("resets_at")))
